@@ -1,11 +1,15 @@
+# IMPORTANT
+
+All credit for this add-on goes to **[artur-safonov](https://github.com/artur-safonov)**, the original developer. I have only made a few changes to his code to enable the brightness of the lamp to be adjusted and to turn the lamp off when SignalRGB passes through the color black. I replaced all the links below with my repositories so that everything works correctly.
+
 # Yeelight Bridge for SignalRGB
 
 Control Yeelight smart bulbs through SignalRGB using a local bridge server with automatic device persistence and color optimization.
 
 ## Repository Structure
 
-- **[yeelight-bridge](https://github.com/artur-safonov/yeelight-bridge)** - SignalRGB addon repository
-- **[yeelight-bridge-server](https://github.com/artur-safonov/yeelight-bridge-server)** - Bridge server repository
+- **[yeelight-bridge](https://github.com/Hexenhub/yeelight-bridge)** - SignalRGB addon repository
+- **[yeelight-bridge-server](https://github.com/Hexenhub/yeelight-bridge-server)** - Bridge server repository
 
 ## Quick Start
 
@@ -17,7 +21,7 @@ The bridge server has been moved to a separate repository. Download and install 
 
 ```bash
 # Clone the server repository
-git clone https://github.com/artur-safonov/yeelight-bridge-server.git
+git clone https://github.com/Hexenhub/yeelight-bridge-server.git
 cd yeelight-bridge-server
 
 # Install dependencies and start
@@ -39,7 +43,7 @@ npm start
 
 ### 3. Install SignalRGB Addon
 
-[![Add To Installation](https://marketplace.signalrgb.com/resources/add-extension-256.png 'Add to My SignalRGB Installation')](https://srgbmods.net/s?p=addon/install?url=https://github.com/artur-safonov/yeelight-bridge)
+[![Add To Installation](https://marketplace.signalrgb.com/resources/add-extension-256.png 'Add to My SignalRGB Installation')](https://srgbmods.net/s?p=addon/install?url=https://github.com/Hexenhub/yeelight-bridge)
 
 ### 4. Add Devices
 - Open Yeelight Bridge device in SignalRGB
@@ -84,5 +88,8 @@ npm run uninstall-service
 
 ## Files
 
-- `YeelightBridge.js` - SignalRGB addon logic
-- `YeelightBridge.qml` - SignalRGB UI
+- `server.js` - Main bridge server that handles Yeelight communication
+- `devices.json` - Persistent storage for device configurations
+- `package.json` - Node.js dependencies and scripts
+- `install-service.js` - Windows service installation script
+- `uninstall-service.js` - Windows service removal script
