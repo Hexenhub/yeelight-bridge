@@ -2,7 +2,7 @@ export function Name() { return "Yeelight Bridge"; }
 export function Version() { return "1.1.0"; }
 export function Type() { return "network"; }
 export function Publisher() { return "Yeelight Bridge"; }
-export function Size() { return [1, 1]; }
+export function Size() { return [8, 5]; }
 export function DefaultPosition() { return [0, 70]; }
 export function DefaultScale() { return 1.0; }
 export function ControllableParameters() {
@@ -18,7 +18,9 @@ const BRIGHTNESS_CHANGE_THRESHOLD = 3; // Prozentpunkte
 
 export function Initialize() {
 	device.setName(controller.name);
-	device.setSize([1, 1]);
+	// Größe vom exportierten Size() verwenden, nicht hartkodiert
+	device.setSize(Size());
+	// Ein Einzel-LED-Gerät (Bulb) — Position bleibt [0,0], wir mitteln aber die ganze Fläche im Render
 	device.setControllableLeds(["LED 1"], [[0, 0]]);
 	device.setImageFromUrl('https://cdn.worldvectorlogo.com/logos/yeelight-1.svg');
 	controller.lastColor = null;
@@ -31,7 +33,8 @@ export function Render() {
 		if (LightingMode === "Forced") {
 			color = hexToRgb(forcedColor);
 		} else {
-			color = device.color(0, 0);
+			// Averaging über die gesamte logische Device-Größe
+			color = averageDeviceColor();
 		}
 
 		const brightness = getPerceivedBrightness(color[0], color[1], color[2]);
@@ -273,4 +276,41 @@ function hexToRgb(hex) {
 	colors[1] = parseInt(result[2], 16);
 	colors[2] = parseInt(result[3], 16);
 	return colors;
+}
+
+// Helfer: mittelt alle Farben aus dem logischen Device-Grid (Size)
+function averageDeviceColor() {
+	const sz = Size();
+	const width = Math.max(1, parseInt(sz[0], 10) || 1);
+	const height = Math.max(1, parseInt(sz[1], 10) || 1);
+
+	let totalR = 0, totalG = 0, totalB = 0;
+	let count = 0;
+
+	for (let x = 0; x < width; x++) {
+		for (let y = 0; y < height; y++) {
+			try {
+				const c = device.color(x, y);
+				if (!c || c.length < 3) continue;
+				totalR += c[0];
+				totalG += c[1];
+				totalB += c[2];
+				count++;
+			} catch (err) {
+				// some device implementations may throw — ignore those cells
+			}
+		}
+	}
+
+	if (count === 0) {
+		// Fallback: obere linke Zelle
+		const fallback = device.color(0, 0) || [0, 0, 0];
+		return [fallback[0], fallback[1], fallback[2]];
+	}
+
+	return [
+		Math.round(totalR / count),
+		Math.round(totalG / count),
+		Math.round(totalB / count)
+	];
 }
