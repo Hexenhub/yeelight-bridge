@@ -23,8 +23,15 @@ export function Initialize() {
 	// Ein Einzel-LED-Gerät (Bulb) — Position bleibt [0,0], wir mitteln aber die ganze Fläche im Render
 	device.setControllableLeds(["LED 1"], [[0, 0]]);
 	device.setImageFromUrl('https://cdn.worldvectorlogo.com/logos/yeelight-1.svg');
+
+	// Zustand initialisieren
 	controller.lastColor = null;
 	controller.lastPowerState = undefined;
+
+	// Sicherstellen, dass die Server-Einstellungen auf dem controller verfügbar sind,
+	// damit Shutdown() darauf zugreifen kann.
+	controller.serverHost = service.getSetting("General", "BridgeServerIP") || '127.0.0.1';
+	controller.serverPort = service.getSetting("General", "BridgeServerPort") || '8888';
 }
 
 export function Render() {
@@ -54,14 +61,31 @@ export function Render() {
 
 export function Shutdown() {
 	device.pause(250);
+
+	if (!controller.serverHost || !controller.serverPort) {
+		console.log("Yeelight Bridge: No server settings for controller, aborting Shutdown.");
+		controller.lastColor = null;
+		controller.lastPowerState = undefined;
+		return;
+	}
+
 	let color = hexToRgb(shutdownColor);
 	const brightness = getPerceivedBrightness(color[0], color[1], color[2]);
-	if (brightness <= 1) {
-		// komplett ausschalten
-		sendPower(false);
-	} else {
-		setColors(color[0], color[1], color[2], brightness);
+
+	try {
+		if (brightness <= 1) {
+			// komplett ausschalten - synchron senden, damit Request nicht abgebrochen wird
+			sendPowerSync(false);
+		} else {
+			// sicherstellen, dass Lampe an ist und Farbe/Helligkeit synchron setzen
+			sendPowerSync(true);
+			sendSetColorSync(color[0], color[1], color[2], brightness);
+			sendSetBrightnessSync(brightness);
+		}
+	} catch (error) {
+		console.log("Yeelight Bridge: Error during Shutdown sync requests:", error);
 	}
+
 	controller.lastColor = null;
 	controller.lastPowerState = undefined;
 }
@@ -262,6 +286,52 @@ function sendPower(power) {
 		console.log("Yeelight Bridge: Error sending power update:", error);
 	}
 }
+
+// --- Synchrone Helfer für Shutdown ---
+function sendSync(path, body) {
+	const host = controller.serverHost;
+	const port = controller.serverPort;
+
+	try {
+		const xhr = new XMLHttpRequest();
+		// false => synchroner Request (beabsichtigt beim Shutdown)
+		xhr.open("POST", `http://${host}:${port}${path}`, false);
+		xhr.setRequestHeader("Content-Type", "application/json");
+		xhr.send(JSON.stringify(body));
+
+		// In einigen Umgebungen kann status 0 auftreten; nur bei echten Fehlern loggen
+		if (xhr.status !== 200 && xhr.status !== 0) {
+			console.log("Yeelight Bridge: Server returned error for " + path + ":", xhr.status);
+		}
+	} catch (error) {
+		console.log("Yeelight Bridge: Error sending sync request " + path + ":", error);
+	}
+}
+
+function sendSetColorSync(r, g, b, brightness) {
+	sendSync("/setColor", {
+		r: r,
+		g: g,
+		b: b,
+		brightness: brightness,
+		bulbs: [controller.id]
+	});
+}
+
+function sendSetBrightnessSync(brightness) {
+	sendSync("/setBrightness", {
+		brightness: brightness,
+		bulbs: [controller.id]
+	});
+}
+
+function sendPowerSync(power) {
+	sendSync("/power", {
+		power: power,
+		bulbs: [controller.id]
+	});
+}
+// --- Ende synchrone Helfer ---
 
 function getPerceivedBrightness(r, g, b) {
 	// Perceived luminance (ITSRGB) scaled to 0-100
