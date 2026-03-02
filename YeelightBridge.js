@@ -14,6 +14,7 @@ export function ControllableParameters() {
 }
 
 const COLOR_THRESHOLD = 10;
+const BRIGHTNESS_CHANGE_THRESHOLD = 3; // Prozentpunkte
 
 export function Initialize() {
 	device.setName(controller.name);
@@ -21,6 +22,7 @@ export function Initialize() {
 	device.setControllableLeds(["LED 1"], [[0, 0]]);
 	device.setImageFromUrl('https://cdn.worldvectorlogo.com/logos/yeelight-1.svg');
 	controller.lastColor = null;
+	controller.lastPowerState = undefined;
 }
 
 export function Render() {
@@ -32,9 +34,13 @@ export function Render() {
 			color = device.color(0, 0);
 		}
 
-		if (hasColorChanged(color)) {
-			setColors(color[0], color[1], color[2]);
-			controller.lastColor = color.slice();
+		const brightness = getPerceivedBrightness(color[0], color[1], color[2]);
+
+		const newState = [color[0], color[1], color[2], brightness];
+
+		if (hasColorChanged(newState)) {
+			setColors(newState[0], newState[1], newState[2], newState[3]);
+			controller.lastColor = newState.slice();
 		}
 		device.pause(100);
 	} catch (error) {
@@ -46,8 +52,15 @@ export function Render() {
 export function Shutdown() {
 	device.pause(250);
 	let color = hexToRgb(shutdownColor);
-	setColors(color[0], color[1], color[2]);
+	const brightness = getPerceivedBrightness(color[0], color[1], color[2]);
+	if (brightness <= 1) {
+		// komplett ausschalten
+		sendPower(false);
+	} else {
+		setColors(color[0], color[1], color[2], brightness);
+	}
 	controller.lastColor = null;
+	controller.lastPowerState = undefined;
 }
 
 
@@ -121,49 +134,136 @@ class YeelightDevice {
 	};
 }
 
-function hasColorChanged(newColor) {
+function hasColorChanged(newState) {
 	if (!controller.lastColor) {
 		return true;
 	}
 
-	const rDiff = Math.abs(newColor[0] - controller.lastColor[0]);
-	const gDiff = Math.abs(newColor[1] - controller.lastColor[1]);
-	const bDiff = Math.abs(newColor[2] - controller.lastColor[2]);
-	
+	const rDiff = Math.abs(newState[0] - controller.lastColor[0]);
+	const gDiff = Math.abs(newState[1] - controller.lastColor[1]);
+	const bDiff = Math.abs(newState[2] - controller.lastColor[2]);
 	const totalDiff = Math.sqrt(rDiff * rDiff + gDiff * gDiff + bDiff * bDiff);
-	
-	return totalDiff >= COLOR_THRESHOLD;
+
+	const brightnessDiff = Math.abs(newState[3] - (controller.lastColor[3] || 0));
+
+	return totalDiff >= COLOR_THRESHOLD || brightnessDiff >= BRIGHTNESS_CHANGE_THRESHOLD;
 }
 
-function setColors(r, g, b) {
+function setColors(r, g, b, brightness) {
 	const host = controller.serverHost;
 	const port = controller.serverPort;
-	
+
+	// Wenn komplett schwarz: ausschalten
+	if (brightness <= 1) {
+		sendPower(false);
+		controller.lastPowerState = false;
+		return;
+	}
+
+	// Stelle sicher, dass Lampe an ist
+	if (controller.lastPowerState === false || controller.lastPowerState === undefined) {
+		sendPower(true);
+		controller.lastPowerState = true;
+	}
+
+	// 1) Setze Farbe (Server unterstützt brightness im Body)
+	sendSetColor(r, g, b, brightness);
+
+	// 2) Für Nicht-MIOT-Geräte wird zusätzlich /setBrightness aufgerufen, damit Helligkeit immer angewendet wird
+	sendSetBrightness(brightness);
+}
+
+function sendSetColor(r, g, b, brightness) {
+	const host = controller.serverHost;
+	const port = controller.serverPort;
+
 	const xhr = new XMLHttpRequest();
 	xhr.open("POST", `http://${host}:${port}/setColor`, true);
 	xhr.setRequestHeader("Content-Type", "application/json");
-	
+
 	xhr.onerror = function() {
 		console.log("Yeelight Bridge: Failed to send color update to server");
 	};
-	
+
 	xhr.onload = function() {
 		if (xhr.status !== 200) {
-			console.log("Yeelight Bridge: Server returned error status:", xhr.status);
+			console.log("Yeelight Bridge: Server returned error status for setColor:", xhr.status);
 		}
 	};
-	
+
 	try {
 		xhr.send(JSON.stringify({
 			r: r,
 			g: g,
 			b: b,
-			brightness: 100,
+			brightness: brightness,
 			bulbs: [controller.id]
 		}));
 	} catch (error) {
 		console.log("Yeelight Bridge: Error sending color update:", error);
 	}
+}
+
+function sendSetBrightness(brightness) {
+	const host = controller.serverHost;
+	const port = controller.serverPort;
+
+	const xhr = new XMLHttpRequest();
+	xhr.open("POST", `http://${host}:${port}/setBrightness`, true);
+	xhr.setRequestHeader("Content-Type", "application/json");
+
+	xhr.onerror = function() {
+		console.log("Yeelight Bridge: Failed to send brightness update to server");
+	};
+
+	xhr.onload = function() {
+		if (xhr.status !== 200) {
+			console.log("Yeelight Bridge: Server returned error status for setBrightness:", xhr.status);
+		}
+	};
+
+	try {
+		xhr.send(JSON.stringify({
+			brightness: brightness,
+			bulbs: [controller.id]
+		}));
+	} catch (error) {
+		console.log("Yeelight Bridge: Error sending brightness update:", error);
+	}
+}
+
+function sendPower(power) {
+	const host = controller.serverHost;
+	const port = controller.serverPort;
+
+	const xhr = new XMLHttpRequest();
+	xhr.open("POST", `http://${host}:${port}/power`, true);
+	xhr.setRequestHeader("Content-Type", "application/json");
+
+	xhr.onerror = function() {
+		console.log("Yeelight Bridge: Failed to send power update to server");
+	};
+
+	xhr.onload = function() {
+		if (xhr.status !== 200) {
+			console.log("Yeelight Bridge: Server returned error status for power:", xhr.status);
+		}
+	};
+
+	try {
+		xhr.send(JSON.stringify({
+			power: power,
+			bulbs: [controller.id]
+		}));
+	} catch (error) {
+		console.log("Yeelight Bridge: Error sending power update:", error);
+	}
+}
+
+function getPerceivedBrightness(r, g, b) {
+	// Perceived luminance (ITSRGB) scaled to 0-100
+	const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+	return Math.max(0, Math.min(100, Math.round((y / 255) * 100)));
 }
 
 function hexToRgb(hex) {
